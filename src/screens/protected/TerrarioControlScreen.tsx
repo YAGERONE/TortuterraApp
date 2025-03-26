@@ -1,4 +1,3 @@
-//src/screens/protected/TerrarioControlScreen.tsx
 "use client"
 
 import { useState, useCallback } from "react"
@@ -29,19 +28,10 @@ const TerrarioControlScreen = () => {
       setLoading(true)
       setError(null)
 
-      // Simulated status since we don't have a direct endpoint
-      // In a real application, you would fetch this from your API
-      const simulatedStatus: TerrarioStatus = {
-        temperature: 28.5,
-        fanState: false,
-        foodLevel: "Regular",
-        turtleActivity: true,
-        stableTemp: 24.0,
-        maxTemp: 30.0,
-        lampState: true,
-      }
+      // Obtener datos reales desde el backend conectado al ESP32
+      const response = await api.getTerrarioStatus()
+      setStatus(response.data)
 
-      setStatus(simulatedStatus)
       setLoading(false)
     } catch (error) {
       console.error("Error fetching terrario status:", error)
@@ -54,10 +44,10 @@ const TerrarioControlScreen = () => {
     useCallback(() => {
       fetchTerrarioStatus()
 
-      // Set up a timer to refresh the status every 30 seconds
+      // Set up a timer to refresh the status every 10 seconds (más frecuente para datos en tiempo real)
       const intervalId = setInterval(() => {
         fetchTerrarioStatus()
-      }, 30000)
+      }, 10000)
 
       return () => clearInterval(intervalId)
     }, []),
@@ -72,15 +62,20 @@ const TerrarioControlScreen = () => {
   const handleFanToggle = async (value: boolean) => {
     try {
       setError(null)
-      await api.controlActuator("fan", value ? "on" : "off")
+      await api.controlActuator({ actuador: "fan", accion: value ? "on" : "off" })
 
-      // Update local state to reflect the change
+      // Actualizamos el estado local para reflejar el cambio inmediatamente
       if (status) {
         setStatus({
           ...status,
           fanState: value,
         })
       }
+      
+      // Refrescamos el estado después de un breve retraso para confirmar el cambio
+      setTimeout(() => {
+        fetchTerrarioStatus()
+      }, 1000)
     } catch (error) {
       console.error("Error toggling fan:", error)
       setError("Error al controlar el ventilador")
@@ -97,15 +92,20 @@ const TerrarioControlScreen = () => {
   const handleLampToggle = async (value: boolean) => {
     try {
       setError(null)
-      await api.controlActuator("lamp", value ? "on" : "off")
+      await api.controlActuator({ actuador: "lamp", accion: value ? "on" : "off" })
 
-      // Update local state to reflect the change
+      // Actualizamos el estado local para reflejar el cambio inmediatamente
       if (status) {
         setStatus({
           ...status,
           lampState: value,
         })
       }
+      
+      // Refrescamos el estado después de un breve retraso para confirmar el cambio
+      setTimeout(() => {
+        fetchTerrarioStatus()
+      }, 1000)
     } catch (error) {
       console.error("Error toggling lamp:", error)
       setError("Error al controlar la lámpara")
@@ -122,8 +122,13 @@ const TerrarioControlScreen = () => {
   const dispenseFood = async () => {
     try {
       setError(null)
-      await api.controlActuator("dispense", "on")
+      await api.controlActuator({ actuador: "dispense", accion: "on" })
       Alert.alert("Éxito", "Comida dispensada correctamente")
+      
+      // Refrescamos el estado después de dispensar comida
+      setTimeout(() => {
+        fetchTerrarioStatus()
+      }, 1000)
     } catch (error) {
       console.error("Error dispensing food:", error)
       setError("Error al dispensar comida")

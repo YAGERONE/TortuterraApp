@@ -173,7 +173,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       await api.verifySecurityAnswer(email, securityAnswer)
 
       // Then change the password
-      await api.changePassword(email, newPassword)
+      await api.changePassword({ email, nuevaPassword: newPassword })
 
       setAuthState((prev) => ({
         ...prev,
@@ -228,4 +228,3 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 }
 
 export default AuthContext
-

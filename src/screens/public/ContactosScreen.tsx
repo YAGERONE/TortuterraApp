@@ -80,10 +80,7 @@ const ContactosScreen = () => {
               <Text style={styles.contactText}>{contacto.telefono}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.contactItem} onPress={() => handleLocation(contacto.ubicacion)}>
-              <Ionicons name="location" size={24} color="#55b96a" />
-              <Text style={styles.contactText}>{contacto.ubicacion}</Text>
-            </TouchableOpacity>
+            
 
             {contacto.redes_sociales && contacto.redes_sociales.length > 0 && (
               <View style={styles.socialContainer}>

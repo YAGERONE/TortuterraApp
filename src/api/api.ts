@@ -3,7 +3,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 
 // Base URL para tu API alojada en Vercel
-const API_URL = "https://backend-red-nine-96.vercel.app/api"
+const API_URL = "https://webtortuterra.vercel.app/api"
 
 // Interfaces para tipos de datos
 export interface Usuario {

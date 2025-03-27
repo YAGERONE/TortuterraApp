@@ -1,3 +1,4 @@
+//src/types/index.ts
 // User types
 export interface User {
   _id: string

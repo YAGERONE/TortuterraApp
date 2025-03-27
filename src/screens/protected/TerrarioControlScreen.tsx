@@ -1,6 +1,5 @@
-"use client"
-
-import { useState, useCallback } from "react"
+// src/screens/protected/TerrarioControlScreen.tsx
+import React, { useState, useCallback, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -11,137 +10,160 @@ import {
   RefreshControl,
   Switch,
   Alert,
-} from "react-native"
-import { Ionicons } from "@expo/vector-icons"
-import * as api from "../../api/api"
-import type { TerrarioStatus } from "../../types"
-import { useFocusEffect } from "@react-navigation/native"
+  Platform,
+  BackHandler
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
+import { useTerrarioApi } from "../../utils/api"; // Importamos nuestro hook API
+
+// Interfaz para el estado del terrario
+interface TerrarioStatus {
+  temperature: number;
+  fanState: boolean;
+  foodLevel: string;
+  turtleActivity: boolean;
+  stableTemp: number;
+  maxTemp: number;
+  lampState: boolean;
+}
 
 const TerrarioControlScreen = () => {
-  const [status, setStatus] = useState<TerrarioStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Estado del terrario
+  const [status, setStatus] = useState<TerrarioStatus>({
+    temperature: 25.0,
+    fanState: false,
+    foodLevel: "medium",
+    turtleActivity: false,
+    stableTemp: 24.0,
+    maxTemp: 30.0,
+    lampState: false
+  });
+  
+  // Estados de interfaz
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  
+  // Hook API para la comunicación
+  const { 
+    status: apiStatus, 
+    connectionStatus, 
+    errorMessage, 
+    connect, 
+    controlFan, 
+    controlLamp, 
+    dispenseFood 
+  } = useTerrarioApi();
+  
+  // Referencia al estado de conexión para el UI
+  const connected = connectionStatus === 'connected';
 
-  const fetchTerrarioStatus = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      // Obtener datos reales desde el backend conectado al ESP32
-      const response = await api.getTerrarioStatus()
-      setStatus(response.data)
-
-      setLoading(false)
-    } catch (error) {
-      console.error("Error fetching terrario status:", error)
-      setError("Error al obtener el estado del terrario")
-      setLoading(false)
+  // Actualizar el estado local cuando cambia el estado de la API
+  useEffect(() => {
+    if (apiStatus) {
+      setStatus(prev => ({
+        ...prev,
+        temperature: apiStatus.temperature,
+        fanState: apiStatus.fanState,
+        foodLevel: apiStatus.foodLevel,
+        turtleActivity: apiStatus.turtleActivity,
+        lampState: apiStatus.lampState
+      }));
+      
+      if (connectionStatus === 'connected') {
+        setLoading(false);
+        setError(null);
+      }
     }
-  }
+  }, [apiStatus, connectionStatus]);
 
+  // Manejar errores de conexión
+  useEffect(() => {
+    if (connectionStatus === 'error' && errorMessage) {
+      setError(`Error de conexión: ${errorMessage}`);
+      setLoading(false);
+      
+      // Incrementar contador de intentos
+      setReconnectAttempts(prev => prev + 1);
+      
+      // Después de algunos intentos, sugerir cambiar de red
+      if (reconnectAttempts >= 3) {
+        setError('No se puede conectar al servidor. Verifica tu conexión a Internet.');
+      }
+    }
+  }, [connectionStatus, errorMessage, reconnectAttempts]);
+
+  // Reconectar cuando la pantalla recibe el foco
   useFocusEffect(
     useCallback(() => {
-      fetchTerrarioStatus()
-
-      // Set up a timer to refresh the status every 10 seconds (más frecuente para datos en tiempo real)
-      const intervalId = setInterval(() => {
-        fetchTerrarioStatus()
-      }, 10000)
-
-      return () => clearInterval(intervalId)
-    }, []),
-  )
-
-  const onRefresh = async () => {
-    setRefreshing(true)
-    await fetchTerrarioStatus()
-    setRefreshing(false)
-  }
-
-  const handleFanToggle = async (value: boolean) => {
-    try {
-      setError(null)
-      await api.controlActuator({ actuador: "fan", accion: value ? "on" : "off" })
-
-      // Actualizamos el estado local para reflejar el cambio inmediatamente
-      if (status) {
-        setStatus({
-          ...status,
-          fanState: value,
-        })
+      if (connectionStatus !== 'connected' && connectionStatus !== 'connecting') {
+        setLoading(true);
+        connect();
       }
       
-      // Refrescamos el estado después de un breve retraso para confirmar el cambio
-      setTimeout(() => {
-        fetchTerrarioStatus()
-      }, 1000)
-    } catch (error) {
-      console.error("Error toggling fan:", error)
-      setError("Error al controlar el ventilador")
-      // Revert the UI state
-      if (status) {
-        setStatus({
-          ...status,
-          fanState: !value,
-        })
+      // En Android, manejar el botón de retroceso para mantener la conexión
+      if (Platform.OS === 'android') {
+        const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+          return false; // Permitir comportamiento por defecto
+        });
+        
+        return () => subscription.remove();
       }
-    }
-  }
+    }, [connectionStatus, connect])
+  );
 
-  const handleLampToggle = async (value: boolean) => {
-    try {
-      setError(null)
-      await api.controlActuator({ actuador: "lamp", accion: value ? "on" : "off" })
-
-      // Actualizamos el estado local para reflejar el cambio inmediatamente
-      if (status) {
-        setStatus({
-          ...status,
-          lampState: value,
-        })
-      }
-      
-      // Refrescamos el estado después de un breve retraso para confirmar el cambio
+  // Función para refrescar la pantalla
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setError(null);
+    
+    // Intentar reconectar
+    connect().finally(() => {
       setTimeout(() => {
-        fetchTerrarioStatus()
-      }, 1000)
-    } catch (error) {
-      console.error("Error toggling lamp:", error)
-      setError("Error al controlar la lámpara")
-      // Revert the UI state
-      if (status) {
-        setStatus({
-          ...status,
-          lampState: !value,
-        })
-      }
-    }
-  }
+        setRefreshing(false);
+      }, 1000);
+    });
+  }, [connect]);
 
-  const dispenseFood = async () => {
-    try {
-      setError(null)
-      await api.controlActuator({ actuador: "dispense", accion: "on" })
-      Alert.alert("Éxito", "Comida dispensada correctamente")
-      
-      // Refrescamos el estado después de dispensar comida
-      setTimeout(() => {
-        fetchTerrarioStatus()
-      }, 1000)
-    } catch (error) {
-      console.error("Error dispensing food:", error)
-      setError("Error al dispensar comida")
+  // Controlar ventilador
+  const handleFanToggle = useCallback((value: boolean) => {
+    if (connected) {
+      controlFan(value);
     }
-  }
+  }, [connected, controlFan]);
 
+  // Controlar lámpara
+  const handleLampToggle = useCallback((value: boolean) => {
+    if (connected) {
+      controlLamp(value);
+    }
+  }, [connected, controlLamp]);
+
+  // Dispensar comida
+  const handleDispenseFood = useCallback(() => {
+    if (connected) {
+      dispenseFood();
+      Alert.alert('Dispensando comida', 'Se ha enviado la orden al dispensador.');
+    }
+  }, [connected, dispenseFood]);
+
+  // Forzar reconexión manual
+  const handleForceReconnect = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    connect();
+  }, [connect]);
+
+  // Mostrar pantalla de carga
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#55b96a" />
-        <Text style={styles.loadingText}>Cargando datos del terrario...</Text>
+        <Text style={styles.loadingText}>Conectando con el terrario...</Text>
       </View>
-    )
+    );
   }
 
   return (
@@ -152,99 +174,124 @@ const TerrarioControlScreen = () => {
       <View style={styles.header}>
         <Text style={styles.title}>Control del Terrario</Text>
         <Text style={styles.subtitle}>Monitorea y controla el hábitat de tu tortuga</Text>
+        
+        {/* Indicador de estado de conexión */}
+        <View style={styles.connectionContainer}>
+          <View style={[styles.connectionIndicator, { backgroundColor: connected ? '#55b96a' : '#ff5252' }]} />
+          <Text style={styles.connectionText}>
+            {connected ? 'Conectado' : 'Desconectado'}
+          </Text>
+        </View>
       </View>
 
       {error && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.reconnectButton} onPress={handleForceReconnect}>
+            <Text style={styles.reconnectButtonText}>Intentar reconectar</Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      {status && (
-        <>
-          <View style={styles.statusCard}>
-            <Text style={styles.statusTitle}>Estado Actual</Text>
+      <View style={styles.statusCard}>
+        <Text style={styles.statusTitle}>Estado Actual</Text>
 
-            <View style={styles.statusRow}>
-              <View style={styles.statusItem}>
-                <Ionicons name="thermometer-outline" size={24} color="#55b96a" />
-                <Text style={styles.statusLabel}>Temperatura</Text>
-                <Text style={styles.statusValue}>{status.temperature}°C</Text>
-              </View>
-
-              <View style={styles.statusItem}>
-                <Ionicons name="water-outline" size={24} color="#55b96a" />
-                <Text style={styles.statusLabel}>Nivel de Comida</Text>
-                <Text style={styles.statusValue}>{status.foodLevel}</Text>
-              </View>
-            </View>
-
-            <View style={styles.statusRow}>
-              <View style={styles.statusItem}>
-                <Ionicons
-                  name={status.turtleActivity ? "footsteps-outline" : "bed-outline"}
-                  size={24}
-                  color="#55b96a"
-                />
-                <Text style={styles.statusLabel}>Actividad</Text>
-                <Text style={styles.statusValue}>{status.turtleActivity ? "Activa" : "Inactiva"}</Text>
-              </View>
-
-              <View style={styles.statusItem}>
-                <Ionicons name="options-outline" size={24} color="#55b96a" />
-                <Text style={styles.statusLabel}>Temp. Ideal</Text>
-                <Text style={styles.statusValue}>
-                  {status.stableTemp}°C - {status.maxTemp}°C
-                </Text>
-              </View>
-            </View>
+        <View style={styles.statusRow}>
+          <View style={styles.statusItem}>
+            <Ionicons name="thermometer-outline" size={24} color="#55b96a" />
+            <Text style={styles.statusLabel}>Temperatura</Text>
+            <Text style={styles.statusValue}>{status.temperature.toFixed(1)}°C</Text>
           </View>
 
-          <View style={styles.controlCard}>
-            <Text style={styles.controlTitle}>Controles</Text>
-
-            <View style={styles.controlItem}>
-              <View style={styles.controlInfo}>
-                <Ionicons name="flash-outline" size={28} color="#333" />
-                <View>
-                  <Text style={styles.controlLabel}>Ventilador</Text>
-                  <Text style={styles.controlStatus}>{status.fanState ? "Encendido" : "Apagado"}</Text>
-                </View>
-              </View>
-              <Switch
-                trackColor={{ false: "#e0e0e0", true: "#cce8d0" }}
-                thumbColor={status.fanState ? "#55b96a" : "#f4f3f4"}
-                onValueChange={handleFanToggle}
-                value={status.fanState}
-              />
-            </View>
-
-            <View style={styles.controlItem}>
-              <View style={styles.controlInfo}>
-                <Ionicons name="bulb-outline" size={28} color="#333" />
-                <View>
-                  <Text style={styles.controlLabel}>Lámpara</Text>
-                  <Text style={styles.controlStatus}>{status.lampState ? "Encendida" : "Apagada"}</Text>
-                </View>
-              </View>
-              <Switch
-                trackColor={{ false: "#e0e0e0", true: "#cce8d0" }}
-                thumbColor={status.lampState ? "#55b96a" : "#f4f3f4"}
-                onValueChange={handleLampToggle}
-                value={status.lampState}
-              />
-            </View>
-
-            <TouchableOpacity style={styles.foodButton} onPress={dispenseFood}>
-              <Ionicons name="fast-food-outline" size={24} color="#fff" />
-              <Text style={styles.foodButtonText}>Dispensar Comida</Text>
-            </TouchableOpacity>
+          <View style={styles.statusItem}>
+            <Ionicons name="water-outline" size={24} color="#55b96a" />
+            <Text style={styles.statusLabel}>Nivel de Comida</Text>
+            <Text style={styles.statusValue}>
+              {status.foodLevel === "empty" ? "Vacío" :
+              status.foodLevel === "medium" ? "Medio" :
+              status.foodLevel === "full" ? "Lleno" : status.foodLevel}
+            </Text>
           </View>
-        </>
-      )}
+        </View>
+
+        <View style={styles.statusRow}>
+          <View style={styles.statusItem}>
+            <Ionicons
+              name={status.turtleActivity ? "footsteps-outline" : "bed-outline"}
+              size={24} color="#55b96a"
+            />
+            <Text style={styles.statusLabel}>Actividad</Text>
+            <Text style={styles.statusValue}>{status.turtleActivity ? "Activa" : "Inactiva"}</Text>
+          </View>
+
+          <View style={styles.statusItem}>
+            <Ionicons name="options-outline" size={24} color="#55b96a" />
+            <Text style={styles.statusLabel}>Temp. Ideal</Text>
+            <Text style={styles.statusValue}>
+              {status.stableTemp}°C - {status.maxTemp}°C
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.controlCard}>
+        <Text style={styles.controlTitle}>Controles</Text>
+
+        <View style={styles.controlItem}>
+          <View style={styles.controlInfo}>
+            <Ionicons name="flash-outline" size={28} color="#333" />
+            <View>
+              <Text style={styles.controlLabel}>Ventilador</Text>
+              <Text style={styles.controlStatus}>{status.fanState ? "Encendido" : "Apagado"}</Text>
+            </View>
+          </View>
+          <Switch
+            trackColor={{ false: "#e0e0e0", true: "#cce8d0" }}
+            thumbColor={status.fanState ? "#55b96a" : "#f4f3f4"}
+            onValueChange={handleFanToggle}
+            value={status.fanState}
+            disabled={!connected}
+          />
+        </View>
+
+        <View style={styles.controlItem}>
+          <View style={styles.controlInfo}>
+            <Ionicons name="bulb-outline" size={28} color="#333" />
+            <View>
+              <Text style={styles.controlLabel}>Lámpara</Text>
+              <Text style={styles.controlStatus}>{status.lampState ? "Encendida" : "Apagada"}</Text>
+            </View>
+          </View>
+          <Switch
+            trackColor={{ false: "#e0e0e0", true: "#cce8d0" }}
+            thumbColor={status.lampState ? "#55b96a" : "#f4f3f4"}
+            onValueChange={handleLampToggle}
+            value={status.lampState}
+            disabled={!connected}
+          />
+        </View>
+
+        <TouchableOpacity 
+          style={[styles.foodButton, !connected && styles.disabledButton]} 
+          onPress={handleDispenseFood} 
+          disabled={!connected}
+        >
+          <Ionicons name="fast-food-outline" size={24} color="#fff" />
+          <Text style={styles.foodButtonText}>Dispensar Comida</Text>
+        </TouchableOpacity>
+      </View>
+      
+      {/* Información de conexión */}
+      <View style={styles.infoCard}>
+        <Text style={styles.infoTitle}>Información de Conexión</Text>
+        <Text style={styles.infoText}>
+          La conexión con el terrario es en tiempo real a través de Internet. 
+          Ahora puedes controlar tu terrario desde cualquier red.
+        </Text>
+      </View>
     </ScrollView>
-  )
-}
+  );
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -274,6 +321,17 @@ const styles = StyleSheet.create({
   errorText: {
     color: "#d32f2f",
     fontSize: 16,
+    marginBottom: 10,
+  },
+  reconnectButton: {
+    backgroundColor: "#ff5252",
+    padding: 8,
+    borderRadius: 5,
+    alignSelf: "flex-end",
+  },
+  reconnectButtonText: {
+    color: "white",
+    fontWeight: "bold",
   },
   header: {
     padding: 20,
@@ -290,6 +348,23 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: "#4b8063",
+    marginBottom: 10,
+  },
+  connectionContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 5,
+  },
+  connectionIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  connectionText: {
+    fontSize: 14,
+    color: "#4b8063",
+    fontWeight: "500",
   },
   statusCard: {
     backgroundColor: "#fff",
@@ -347,7 +422,7 @@ const styles = StyleSheet.create({
     elevation: 3,
     borderWidth: 1,
     borderColor: "#c3e6cd",
-    marginBottom: 25,
+    marginBottom: 15,
   },
   controlTitle: {
     fontSize: 18,
@@ -398,6 +473,35 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginLeft: 10,
   },
-})
+  disabledButton: {
+    backgroundColor: "#a0a0a0",
+    opacity: 0.7,
+  },
+  infoCard: {
+    backgroundColor: "#f0f7ff",
+    margin: 15,
+    borderRadius: 12,
+    padding: 18,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#c5d9f1",
+    marginBottom: 25,
+  },
+  infoTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#3a5d8f",
+    marginBottom: 10,
+  },
+  infoText: {
+    fontSize: 14,
+    color: "#4a6d9f",
+    lineHeight: 20,
+  }
+});
 
-export default TerrarioControlScreen
+export default TerrarioControlScreen;

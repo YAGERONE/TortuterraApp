@@ -1,8 +1,9 @@
+// src/api/api.ts
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 
 // Base URL para tu API alojada en Vercel
-const API_URL = "https://terrario1.vercel.app/api"
+const API_URL = "https://backend-red-nine-96.vercel.app/api"
 
 // Interfaces para tipos de datos
 export interface Usuario {
@@ -82,6 +83,9 @@ api.interceptors.response.use(
   }
 )
 
+// Función genérica para peticiones GET
+export const fetch = (url: string) => api.get(url);
+
 // Endpoints de información pública
 export const fetchContactos = () => api.get("/contactos")
 export const fetchInformaciones = () => api.get("/informaciones")
@@ -109,6 +113,7 @@ export const controlActuator = (datos: ControlActuador) => api.post("/control", 
 export const getTerrarioData = () => api.get("/terrario")
 export const getTerrarioHistory = (days: number = 7) => api.get(`/terrario/historial?dias=${days}`)
 export const getTerrarioStatus = () => api.get("/terrario/estado")
+export const getTerrarioConnectivity = () => api.get("/terrario/conectividad")
 
 // Exportar API por defecto
 export default api
